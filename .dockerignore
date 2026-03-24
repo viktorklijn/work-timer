@@ -1,0 +1,12 @@
+node_modules
+.next
+dev.db
+dev.db-journal
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.git
+.agents
+AGENTS.md
+CLAUDE.md

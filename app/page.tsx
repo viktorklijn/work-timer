@@ -54,9 +54,44 @@ export default function TimerPage() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
 
   const sessionStartRef = useRef<number | null>(null);
   const checkpointRef = useRef<number | null>(null);
+
+  // Restore state from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("work-timer-active");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.isRunning) {
+          sessionStartRef.current = parsed.sessionStart;
+          checkpointRef.current = parsed.checkpointStart;
+          setComment(parsed.comment || "");
+          setIsRunning(true);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to parse saved timer state", e);
+    }
+    setIsHydrated(true);
+  }, []);
+
+  // Save current active state to localStorage automatically
+  useEffect(() => {
+    if (!isHydrated) return;
+    if (isRunning) {
+      localStorage.setItem("work-timer-active", JSON.stringify({
+        isRunning: true,
+        sessionStart: sessionStartRef.current,
+        checkpointStart: checkpointRef.current,
+        comment
+      }));
+    } else {
+      localStorage.removeItem("work-timer-active");
+    }
+  }, [isRunning, comment, isHydrated]);
 
   useEffect(() => {
     const today = todayDateString();
@@ -128,6 +163,14 @@ export default function TimerPage() {
     checkpointRef.current = now;
     setTaskDisplayMs(0);
     setComment("");
+    
+    // Manually force an update to localStorage right after logging so the new checkpoint is saved
+    localStorage.setItem("work-timer-active", JSON.stringify({
+      isRunning: true,
+      sessionStart: sessionStartRef.current,
+      checkpointStart: now,
+      comment: ""
+    }));
   };
 
   const handleStop = async () => {
@@ -141,6 +184,7 @@ export default function TimerPage() {
     setTaskDisplayMs(0);
     sessionStartRef.current = null;
     checkpointRef.current = null;
+    localStorage.removeItem("work-timer-active");
   };
 
   const handleDelete = async (id: string) => {
