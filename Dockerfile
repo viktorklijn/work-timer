@@ -12,6 +12,8 @@ FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# Add dummy DATABASE_URL so prisma.config.ts doesn't fail during generate
+ENV DATABASE_URL="file:./dev.db"
 RUN npx prisma generate
 RUN npm run build
 
