@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, CalendarDays, Trash2 } from "lucide-react";
+import { ArrowLeft, CalendarDays, Trash2, Copy, CheckCircle2 } from "lucide-react";
 
 type Entry = {
   id: string;
@@ -25,6 +25,7 @@ function formatDuration(seconds: number): string {
 export default function HistoryPage() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [copiedGroupDate, setCopiedGroupDate] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/entries")
@@ -42,6 +43,21 @@ export default function HistoryPage() {
   const handleDelete = async (id: string) => {
     await fetch(`/api/entries/${id}`, { method: "DELETE" });
     setEntries((prev) => prev.filter((e) => e.id !== id));
+  };
+
+  const handleCopyToSpreadsheet = async (group: Group) => {
+    if (group.entries.length === 0) return;
+    const header = "Date\tTime (hrs mins)\tTask/Log\n";
+    const rows = group.entries.map(entry => {
+      const d = entry.date.split("T")[0];
+      const t = formatDuration(entry.durationSeconds);
+      const c = entry.comment.replace(/\t/g, " ").replace(/\n/g, " ");
+      return `${d}\t${t}\t${c}`;
+    }).join("\n");
+    
+    await navigator.clipboard.writeText(header + rows);
+    setCopiedGroupDate(group.dateStr);
+    setTimeout(() => setCopiedGroupDate(null), 2000);
   };
 
   type Group = { dateStr: string; entries: Entry[]; totalSeconds: number };
@@ -136,16 +152,23 @@ export default function HistoryPage() {
             {groups.map((group) => (
               <motion.section key={group.dateStr} variants={itemVariants} className="relative">
                 {/* Date Header */}
-                <div className="sticky top-0 z-20 py-4 mb-4 backdrop-blur-xl bg-[var(--color-bg-base)]/80 flex items-center justify-between border-b border-[var(--color-text-muted)]/10">
-                  <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
-                    {formatDateStr(group.dateStr)}
-                  </h2>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-mono text-[var(--color-text-secondary)] uppercase tracking-wider">Total</span>
-                    <span className="text-sm font-mono font-medium text-[var(--color-brand-primary)] bg-[var(--color-brand-primary)]/10 px-3 py-1.5 rounded-full border border-[var(--color-brand-primary)]/20">
+                <div className="sticky top-0 z-20 py-4 mb-4 backdrop-blur-xl bg-[var(--color-bg-base)]/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[var(--color-text-muted)]/10">
+                  <div className="flex items-center gap-4">
+                    <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
+                      {formatDateStr(group.dateStr)}
+                    </h2>
+                    <span className="text-sm font-mono font-medium text-[var(--color-brand-primary)] bg-[var(--color-brand-primary)]/10 px-3 py-1 rounded-full border border-[var(--color-brand-primary)]/20">
                       {formatDuration(group.totalSeconds)}
                     </span>
                   </div>
+                  
+                  <button
+                    onClick={() => handleCopyToSpreadsheet(group)}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-black/5 transition-colors w-fit"
+                  >
+                    {copiedGroupDate === group.dateStr ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedGroupDate === group.dateStr ? "Copied!" : "Copy to Sheets"}
+                  </button>
                 </div>
 
                 {/* Day's Entries */}

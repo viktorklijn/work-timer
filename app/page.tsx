@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, Square, CheckCircle2, History, Trash2, Clock } from "lucide-react";
+import { Play, Square, CheckCircle2, History, Trash2, Clock, Copy } from "lucide-react";
 
 type Entry = {
   id: string;
@@ -53,6 +53,7 @@ export default function TimerPage() {
   const [comment, setComment] = useState("");
   const [entries, setEntries] = useState<Entry[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
 
   const sessionStartRef = useRef<number | null>(null);
   const checkpointRef = useRef<number | null>(null);
@@ -145,6 +146,21 @@ export default function TimerPage() {
   const handleDelete = async (id: string) => {
     await fetch(`/api/entries/${id}`, { method: "DELETE" });
     setEntries((prev) => prev.filter((e) => e.id !== id));
+  };
+
+  const handleCopyToSpreadsheet = async () => {
+    if (entries.length === 0) return;
+    const header = "Date\tTime (hrs mins)\tTask/Log\n";
+    const rows = entries.map(entry => {
+      const d = entry.date.split("T")[0];
+      const t = formatDuration(entry.durationSeconds);
+      const c = entry.comment.replace(/\t/g, " ").replace(/\n/g, " "); // sanitize for tsv
+      return `${d}\t${t}\t${c}`;
+    }).join("\n");
+    
+    await navigator.clipboard.writeText(header + rows);
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2000);
   };
 
   const totalToday = entries.reduce((s, e) => s + e.durationSeconds, 0);
@@ -286,10 +302,20 @@ export default function TimerPage() {
             className="w-full max-w-2xl mx-auto px-6 pb-12 relative z-10"
           >
             <div className="flex items-center justify-between mb-6 px-2">
-              <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Today's Progress</h2>
-              <span className="text-sm font-mono text-[var(--color-brand-primary)] bg-[var(--color-brand-primary)]/10 px-3 py-1 rounded-full font-medium">
-                {formatDuration(totalToday)}
-              </span>
+              <div className="flex items-center gap-4">
+                <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Today's Progress</h2>
+                <span className="text-sm font-mono text-[var(--color-brand-primary)] bg-[var(--color-brand-primary)]/10 px-3 py-1 rounded-full font-medium">
+                  {formatDuration(totalToday)}
+                </span>
+              </div>
+              <button
+                onClick={handleCopyToSpreadsheet}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-black/5 transition-colors"
+                title="Copy to Spreadsheet"
+              >
+                {isCopied ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                {isCopied ? "Copied!" : "Copy to Sheets"}
+              </button>
             </div>
             
             <div className="glass-panel rounded-2xl overflow-hidden divide-y divide-[var(--color-text-primary)]/5 bg-white/60">
