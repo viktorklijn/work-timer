@@ -10,6 +10,15 @@ datasource db {
   provider = "sqlite"
 }
 
+model Project {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  color     String?
+  createdAt DateTime @default(now())
+
+  entries   Entry[]
+}
+
 model Entry {
   id              String   @id @default(cuid())
   date            DateTime
@@ -19,5 +28,9 @@ model Entry {
   comment         String
   createdAt       DateTime @default(now())
 
+  projectId       String?
+  project         Project? @relation(fields: [projectId], references: [id])
+
   @@index([date])
+  @@index([projectId])
 }

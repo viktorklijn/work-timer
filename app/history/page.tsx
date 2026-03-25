@@ -5,6 +5,12 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, CalendarDays, Trash2, Copy, CheckCircle2 } from "lucide-react";
 
+type Project = {
+  id: string;
+  name: string;
+  color: string | null;
+};
+
 type Entry = {
   id: string;
   date: string;
@@ -13,6 +19,7 @@ type Entry = {
   durationSeconds: number;
   comment: string;
   createdAt: string;
+  project?: Project;
 };
 
 function formatDuration(seconds: number): string {
@@ -45,33 +52,52 @@ export default function HistoryPage() {
     setEntries((prev) => prev.filter((e) => e.id !== id));
   };
 
-  const handleCopyToSpreadsheet = async (group: Group) => {
-    if (group.entries.length === 0) return;
-    const header = "Date\tTime (hrs mins)\tTask/Log\n";
-    const rows = group.entries.map(entry => {
-      const d = entry.date.split("T")[0];
-      const t = formatDuration(entry.durationSeconds);
-      const c = entry.comment.replace(/\t/g, " ").replace(/\n/g, " ");
-      return `${d}\t${t}\t${c}`;
-    }).join("\n");
+  const handleCopyToSpreadsheet = async (day: DayGroup) => {
+    let hasEntries = false;
+    const rows: string[] = [];
+    Object.values(day.projectGroups).forEach(pg => {
+      pg.entries.forEach(entry => {
+        hasEntries = true;
+        const d = entry.date.split("T")[0];
+        const p = pg.projectName;
+        const t = formatDuration(entry.durationSeconds);
+        const c = entry.comment.replace(/\t/g, " ").replace(/\n/g, " ");
+        rows.push(`${d}\t${p}\t${t}\t${c}`);
+      });
+    });
     
-    await navigator.clipboard.writeText(header + rows);
-    setCopiedGroupDate(group.dateStr);
+    if (!hasEntries) return;
+    const header = "Date\tProject\tTime (hrs mins)\tTask/Log\n";
+    
+    await navigator.clipboard.writeText(header + rows.join("\n"));
+    setCopiedGroupDate(day.dateStr);
     setTimeout(() => setCopiedGroupDate(null), 2000);
   };
 
-  type Group = { dateStr: string; entries: Entry[]; totalSeconds: number };
+  type ProjectGroup = { projectId: string; projectName: string; projectColor: string | null; entries: Entry[]; totalSeconds: number; };
+  type DayGroup = { dateStr: string; totalSeconds: number; projectGroups: Record<string, ProjectGroup> };
+
   const groupsRecord = entries.reduce((acc, entry) => {
     const dStr = entry.date.split("T")[0];
     if (!acc[dStr]) {
-      acc[dStr] = { dateStr: dStr, entries: [], totalSeconds: 0 };
+      acc[dStr] = { dateStr: dStr, totalSeconds: 0, projectGroups: {} };
     }
-    acc[dStr].entries.push(entry);
+    
+    const pId = entry.project?.id || "unassigned";
+    const pName = entry.project?.name || "Uncategorized";
+    const pColor = entry.project?.color || null;
+
+    if (!acc[dStr].projectGroups[pId]) {
+      acc[dStr].projectGroups[pId] = { projectId: pId, projectName: pName, projectColor: pColor, entries: [], totalSeconds: 0 };
+    }
+
+    acc[dStr].projectGroups[pId].entries.push(entry);
+    acc[dStr].projectGroups[pId].totalSeconds += entry.durationSeconds;
     acc[dStr].totalSeconds += entry.durationSeconds;
     return acc;
-  }, {} as Record<string, Group>);
+  }, {} as Record<string, DayGroup>);
 
-  const groups = Object.values(groupsRecord);
+  const days = Object.values(groupsRecord).sort((a, b) => b.dateStr.localeCompare(a.dateStr));
 
   const formatDateStr = (ymd: string) => {
     const [y, m, d] = ymd.split("-");
@@ -127,7 +153,7 @@ export default function HistoryPage() {
               <div key={i} className="glass-panel h-48 rounded-2xl animate-pulse bg-white border-[var(--color-text-muted)]/10" />
             ))}
           </div>
-        ) : groups.length === 0 ? (
+        ) : days.length === 0 ? (
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -149,58 +175,79 @@ export default function HistoryPage() {
             animate="show"
             className="space-y-10 mt-8"
           >
-            {groups.map((group) => (
-              <motion.section key={group.dateStr} variants={itemVariants} className="relative">
+            {days.map((day) => (
+              <motion.section key={day.dateStr} variants={itemVariants} className="relative">
                 {/* Date Header */}
                 <div className="sticky top-0 z-20 py-4 mb-4 backdrop-blur-xl bg-[var(--color-bg-base)]/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[var(--color-text-muted)]/10">
                   <div className="flex items-center gap-4">
                     <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
-                      {formatDateStr(group.dateStr)}
+                      {formatDateStr(day.dateStr)}
                     </h2>
                     <span className="text-sm font-mono font-medium text-[var(--color-brand-primary)] bg-[var(--color-brand-primary)]/10 px-3 py-1 rounded-full border border-[var(--color-brand-primary)]/20">
-                      {formatDuration(group.totalSeconds)}
+                      {formatDuration(day.totalSeconds)}
                     </span>
                   </div>
                   
                   <button
-                    onClick={() => handleCopyToSpreadsheet(group)}
+                    onClick={() => handleCopyToSpreadsheet(day)}
                     className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-black/5 transition-colors w-fit"
                   >
-                    {copiedGroupDate === group.dateStr ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
-                    {copiedGroupDate === group.dateStr ? "Copied!" : "Copy to Sheets"}
+                    {copiedGroupDate === day.dateStr ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedGroupDate === day.dateStr ? "Copied!" : "Copy to Sheets"}
                   </button>
                 </div>
 
-                {/* Day's Entries */}
-                <div className="glass-panel rounded-2xl overflow-hidden divide-y divide-[var(--color-text-muted)]/10 bg-white/60 shadow-sm border-[var(--color-text-muted)]/10">
-                  <AnimatePresence>
-                    {group.entries.map((entry) => (
-                      <motion.div
-                        key={entry.id}
-                        layout
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="group flex items-start sm:items-center gap-4 px-6 py-5 hover:bg-white transition-colors"
-                      >
-                        <div className="w-20 shrink-0 pt-0.5 sm:pt-0">
-                          <span className="text-xs font-mono font-medium text-[var(--color-text-secondary)] bg-[var(--color-text-primary)]/5 px-2.5 py-1.5 rounded-md">
-                            {formatDuration(entry.durationSeconds)}
-                          </span>
+                {/* Day's Entries by Project */}
+                <div className="flex flex-col gap-5">
+                  {Object.values(day.projectGroups).map(pg => (
+                    <div key={pg.projectId} className="glass-panel rounded-2xl overflow-hidden bg-white/60 shadow-sm border-[var(--color-text-muted)]/10">
+                      {/* Project Header */}
+                      <div className="px-5 py-3 bg-[var(--color-text-primary)]/5 border-b border-[var(--color-text-muted)]/5 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span 
+                            className="w-2.5 h-2.5 rounded-full" 
+                            style={{ backgroundColor: pg.projectColor || 'var(--color-text-muted)' }}
+                          />
+                          <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{pg.projectName}</h3>
                         </div>
-                        <span className="text-[15px] font-medium text-[var(--color-text-primary)] leading-relaxed flex-1">
-                          {entry.comment}
+                        <span className="text-xs font-mono font-medium text-[var(--color-text-secondary)] bg-white/50 px-2 rounded-md shadow-sm">
+                          {formatDuration(pg.totalSeconds)}
                         </span>
-                        <button
-                          onClick={() => handleDelete(entry.id)}
-                          className="w-8 h-8 rounded-full flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-brand-secondary)] hover:bg-[var(--color-brand-secondary)]/10 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0 transform translate-x-2 group-hover:translate-x-0"
-                          aria-label="Delete entry"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
+                      </div>
+                      
+                      {/* Project Entries */}
+                      <div className="divide-y divide-[var(--color-text-muted)]/10">
+                        <AnimatePresence>
+                          {pg.entries.map((entry) => (
+                            <motion.div
+                              key={entry.id}
+                              layout
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className="group flex items-start sm:items-center gap-4 px-6 py-4 hover:bg-white transition-colors"
+                            >
+                              <div className="w-20 shrink-0 pt-0.5 sm:pt-0">
+                                <span className="text-xs font-mono font-medium text-[var(--color-text-secondary)] bg-[var(--color-text-primary)]/5 px-2.5 py-1.5 rounded-md">
+                                  {formatDuration(entry.durationSeconds)}
+                                </span>
+                              </div>
+                              <span className="text-[15px] font-medium text-[var(--color-text-primary)] leading-relaxed flex-1">
+                                {entry.comment}
+                              </span>
+                              <button
+                                onClick={() => handleDelete(entry.id)}
+                                className="w-8 h-8 rounded-full flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-brand-secondary)] hover:bg-[var(--color-brand-secondary)]/10 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0 transform translate-x-2 group-hover:translate-x-0"
+                                aria-label="Delete entry"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </motion.div>
+                          ))}
+                        </AnimatePresence>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </motion.section>
             ))}

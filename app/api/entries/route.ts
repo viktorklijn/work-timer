@@ -12,6 +12,9 @@ export async function GET(request: NextRequest) {
         from && to
           ? { date: { gte: new Date(from), lte: new Date(to) } }
           : undefined,
+      include: {
+        project: true,
+      },
       orderBy: [{ date: "desc" }, { startTime: "desc" }],
     });
     return NextResponse.json(entries);
@@ -25,7 +28,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const { date, startTime, endTime, durationSeconds, comment } =
+    const { date, startTime, endTime, durationSeconds, comment, projectId } =
       await request.json();
 
     const entry = await prisma.entry.create({
@@ -35,6 +38,10 @@ export async function POST(request: NextRequest) {
         endTime: new Date(endTime),
         durationSeconds,
         comment,
+        projectId: projectId || null,
+      },
+      include: {
+        project: true,
       },
     });
 

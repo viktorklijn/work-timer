@@ -3,7 +3,13 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, Square, CheckCircle2, History, Trash2, Clock, Copy } from "lucide-react";
+import { Play, Square, CheckCircle2, History, Trash2, Clock, Copy, X } from "lucide-react";
+
+type Project = {
+  id: string;
+  name: string;
+  color: string | null;
+};
 
 type Entry = {
   id: string;
@@ -13,6 +19,7 @@ type Entry = {
   durationSeconds: number;
   comment: string;
   createdAt: string;
+  project?: Project;
 };
 
 function formatTime(ms: number): string {
@@ -52,6 +59,10 @@ export default function TimerPage() {
   const [taskDisplayMs, setTaskDisplayMs] = useState(0);
   const [comment, setComment] = useState("");
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
@@ -69,6 +80,7 @@ export default function TimerPage() {
           sessionStartRef.current = parsed.sessionStart;
           checkpointRef.current = parsed.checkpointStart;
           setComment(parsed.comment || "");
+          if (parsed.projectId) setSelectedProjectId(parsed.projectId);
           setIsRunning(true);
         }
       }
@@ -86,18 +98,24 @@ export default function TimerPage() {
         isRunning: true,
         sessionStart: sessionStartRef.current,
         checkpointStart: checkpointRef.current,
-        comment
+        comment,
+        projectId: selectedProjectId
       }));
     } else {
       localStorage.removeItem("work-timer-active");
     }
-  }, [isRunning, comment, isHydrated]);
+  }, [isRunning, comment, isHydrated, selectedProjectId]);
 
   useEffect(() => {
     const today = todayDateString();
     fetch(`/api/entries?from=${today}&to=${today}`)
       .then((r) => r.json())
       .then((data) => setEntries(Array.isArray(data) ? data : []))
+      .catch(console.error);
+
+    fetch("/api/projects")
+      .then((r) => r.json())
+      .then((data) => setProjects(Array.isArray(data) ? data : []))
       .catch(console.error);
   }, []);
 
@@ -128,7 +146,7 @@ export default function TimerPage() {
       const durationSeconds = Math.floor(
         (endMs - checkpointRef.current) / 1000
       );
-      if (durationSeconds < 1) return null;
+      if (durationSeconds < 60) return null;
 
       setIsSaving(true);
       try {
@@ -141,6 +159,7 @@ export default function TimerPage() {
             endTime: new Date(endMs).toISOString(),
             durationSeconds,
             comment: text.trim(),
+            projectId: selectedProjectId || undefined,
           }),
         });
         const entry: Entry = await res.json();
@@ -153,7 +172,7 @@ export default function TimerPage() {
         setIsSaving(false);
       }
     },
-    []
+    [selectedProjectId]
   );
 
   const handleLogTask = async () => {
@@ -169,7 +188,8 @@ export default function TimerPage() {
       isRunning: true,
       sessionStart: sessionStartRef.current,
       checkpointStart: now,
-      comment: ""
+      comment: "",
+      projectId: selectedProjectId
     }));
   };
 
@@ -192,14 +212,35 @@ export default function TimerPage() {
     setEntries((prev) => prev.filter((e) => e.id !== id));
   };
 
+  const handleCreateProject = async () => {
+    if (!newProjectName.trim()) return;
+    try {
+      const res = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newProjectName.trim() }),
+      });
+      if (res.ok) {
+        const p = await res.json();
+        setProjects((prev) => [...prev, p].sort((a, b) => a.name.localeCompare(b.name)));
+        setSelectedProjectId(p.id);
+        setNewProjectName("");
+        setIsCreatingProject(false);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleCopyToSpreadsheet = async () => {
     if (entries.length === 0) return;
-    const header = "Date\tTime (hrs mins)\tTask/Log\n";
+    const header = "Date\tProject\tTime (hrs mins)\tTask/Log\n";
     const rows = entries.map(entry => {
       const d = entry.date.split("T")[0];
+      const p = entry.project?.name || "Uncategorized";
       const t = formatDuration(entry.durationSeconds);
       const c = entry.comment.replace(/\t/g, " ").replace(/\n/g, " "); // sanitize for tsv
-      return `${d}\t${t}\t${c}`;
+      return `${d}\t${p}\t${t}\t${c}`;
     }).join("\n");
     
     await navigator.clipboard.writeText(header + rows);
@@ -252,6 +293,54 @@ export default function TimerPage() {
               className="absolute inset-0 bg-[var(--color-brand-primary)]/10 blur-[80px] rounded-full z-0"
             />
           )}
+
+          {/* Project Selector */}
+          <div className="flex justify-center mb-6 relative z-20">
+            {isCreatingProject ? (
+              <div className="flex items-center gap-2 glass-panel bg-white/50 px-3 py-1.5 rounded-full border border-white/80 shadow-sm">
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="New project name"
+                  value={newProjectName}
+                  onChange={(e) => setNewProjectName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleCreateProject()}
+                  className="bg-transparent border-none px-2 text-sm font-medium text-[var(--color-text-primary)] focus:outline-none focus:ring-0 w-36 placeholder-[var(--color-text-muted)]"
+                />
+                <button onClick={handleCreateProject} className="text-[var(--color-brand-primary)] hover:brightness-110 p-1">
+                  <CheckCircle2 className="w-4 h-4" />
+                </button>
+                <button onClick={() => { setIsCreatingProject(false); setNewProjectName(""); }} className="text-[var(--color-text-muted)] hover:text-red-500 p-1">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="relative flex items-center">
+                <select
+                  value={selectedProjectId}
+                  onChange={(e) => {
+                    if (e.target.value === "NEW_PROJECT") {
+                      setIsCreatingProject(true);
+                    } else {
+                      setSelectedProjectId(e.target.value);
+                    }
+                  }}
+                  className="appearance-none glass-panel bg-white/50 pl-4 pr-10 py-1.5 rounded-full border border-white/80 shadow-sm text-sm font-medium text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/20 cursor-pointer min-w-[140px]"
+                >
+                  <option value="">No Project</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                  <option value="NEW_PROJECT" className="font-semibold text-[var(--color-brand-primary)]">+ Add New Project</option>
+                </select>
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--color-text-muted)]">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/></svg>
+                </div>
+              </div>
+            )}
+          </div>
 
           <div
             className="font-mono tabular-nums tracking-tighter relative z-10 transition-all duration-700 ease-out"
@@ -316,11 +405,11 @@ export default function TimerPage() {
               <>
                 <button
                   onClick={handleLogTask}
-                  disabled={!comment.trim() || isSaving}
+                  disabled={!comment.trim() || isSaving || taskDisplayMs < 60000}
                   className="h-[56px] px-6 bg-[var(--color-brand-primary)] text-white font-medium rounded-xl flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all shadow-[0_8px_16px_-4px_rgba(116,97,232,0.4)] disabled:opacity-50 disabled:active:scale-100 flex-1 sm:flex-none justify-center"
                 >
                   <CheckCircle2 className="w-5 h-5" />
-                  <span>Log Task</span>
+                  <span>{taskDisplayMs < 60000 ? "< 1 min" : "Log Task"}</span>
                 </button>
                 <button
                   onClick={handleStop}
@@ -347,7 +436,7 @@ export default function TimerPage() {
           >
             <div className="flex items-center justify-between mb-6 px-2">
               <div className="flex items-center gap-4">
-                <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Today's Progress</h2>
+                <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Today&apos;s Progress</h2>
                 <span className="text-sm font-mono text-[var(--color-brand-primary)] bg-[var(--color-brand-primary)]/10 px-3 py-1 rounded-full font-medium">
                   {formatDuration(totalToday)}
                 </span>
@@ -379,9 +468,20 @@ export default function TimerPage() {
                           {formatDuration(entry.durationSeconds)}
                         </span>
                       </div>
-                      <span className="text-[15px] font-medium text-[var(--color-text-primary)] flex-1 truncate">
-                        {entry.comment}
-                      </span>
+                      <div className="flex-1 min-w-0 flex flex-col justify-center">
+                        <span className="text-[15px] font-medium text-[var(--color-text-primary)] truncate block">
+                          {entry.comment}
+                        </span>
+                        {entry.project && (
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-secondary)] flex items-center gap-1.5 mt-1 bg-[var(--color-text-primary)]/5 border border-[var(--color-text-primary)]/10 px-2 py-0.5 rounded-md w-fit shadow-sm">
+                            <span 
+                              className="w-1.5 h-1.5 rounded-full" 
+                              style={{ backgroundColor: entry.project.color || 'var(--color-brand-primary)' }}
+                            />
+                            {entry.project.name}
+                          </span>
+                        )}
+                      </div>
                       <button
                         onClick={() => handleDelete(entry.id)}
                         className="w-8 h-8 rounded-full flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-brand-secondary)] hover:bg-[var(--color-brand-secondary)]/10 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0"
