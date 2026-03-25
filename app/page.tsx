@@ -59,10 +59,113 @@ function todayDateString(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+const LiveClock = ({ sessionStartRef, checkpointRef, isRunning, lastActionTick }: { 
+  sessionStartRef: React.MutableRefObject<number | null>;
+  checkpointRef: React.MutableRefObject<number | null>;
+  isRunning: boolean;
+  lastActionTick: number;
+}) => {
+  const [sessionMs, setSessionMs] = useState(0);
+  const [taskMs, setTaskMs] = useState(0);
+
+  useEffect(() => {
+    const update = () => {
+      const now = Date.now();
+      if (sessionStartRef.current) setSessionMs(now - sessionStartRef.current);
+      else setSessionMs(0);
+      if (checkpointRef.current) setTaskMs(now - checkpointRef.current);
+      else setTaskMs(0);
+    };
+
+    update();
+    if (!isRunning) return;
+
+    const id = setInterval(update, 1000);
+    return () => clearInterval(id);
+  }, [isRunning, sessionStartRef, checkpointRef, lastActionTick]);
+
+  return (
+    <>
+      <div
+        className="font-mono tabular-nums tracking-tighter relative z-10 transition-all duration-700 ease-out"
+        style={{
+          fontSize: "clamp(5rem, 15vw, 9rem)",
+          fontWeight: 400,
+          color: isRunning ? "var(--color-brand-primary)" : "var(--color-text-primary)",
+          textShadow: isRunning ? "0 4px 32px rgba(116, 97, 232, 0.3)" : "none",
+        }}
+      >
+        {formatTime(sessionMs)}
+      </div>
+      
+      <AnimatePresence>
+        {isRunning && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="absolute left-1/2 -translate-x-1/2 -bottom-6 flex items-center gap-2"
+          >
+            <div className="w-1.5 h-1.5 rounded-full bg-[var(--color-brand-accent)] animate-pulse shadow-[0_0_8px_rgba(45,196,138,0.6)]" />
+            <span className="text-xs font-mono tracking-widest text-[var(--color-brand-accent)] uppercase font-semibold">
+              {formatTime(taskMs)}
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+};
+
+const LogTaskButton = ({ checkpointRef, isRunning, isSaving, comment, onLogTask, lastActionTick }: {
+  checkpointRef: React.MutableRefObject<number | null>;
+  isRunning: boolean;
+  isSaving: boolean;
+  comment: string;
+  onLogTask: () => void;
+  lastActionTick: number;
+}) => {
+  const [canLog, setCanLog] = useState(false);
+
+  useEffect(() => {
+    let id: ReturnType<typeof setInterval> | null = null;
+    const update = () => {
+      if (!isRunning || !checkpointRef.current) {
+        setCanLog(false);
+      } else {
+        const elapsed = Date.now() - checkpointRef.current;
+        if (elapsed >= 60000) {
+          setCanLog(true);
+          if (id) {
+            clearInterval(id);
+            id = null;
+          }
+        } else {
+          setCanLog(false);
+        }
+      }
+    };
+    update();
+    if (!isRunning) return;
+    id = setInterval(update, 1000);
+    return () => { if (id) clearInterval(id); };
+  }, [isRunning, checkpointRef, lastActionTick]);
+
+  return (
+    <button
+      onClick={onLogTask}
+      disabled={!comment.trim() || isSaving || !canLog}
+      className="h-[56px] px-6 bg-[var(--color-brand-primary)] text-white font-medium rounded-xl flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all shadow-[0_8px_16px_-4px_rgba(116,97,232,0.4)] disabled:opacity-50 disabled:active:scale-100 flex-1 sm:flex-none justify-center"
+    >
+      <CheckCircle2 className="w-5 h-5" />
+      <span>{!canLog ? "< 1 min" : "Log Task"}</span>
+    </button>
+  );
+};
+
 export default function TimerPage() {
   const [isRunning, setIsRunning] = useState(false);
-  const [sessionDisplayMs, setSessionDisplayMs] = useState(0);
-  const [taskDisplayMs, setTaskDisplayMs] = useState(0);
+  const [lastActionTick, setLastActionTick] = useState(0);
   const [comment, setComment] = useState("");
   const [entries, setEntries] = useState<Entry[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -109,15 +212,15 @@ export default function TimerPage() {
   useEffect(() => {
     if (!isHydrated) return;
 
-    const intervalId = setInterval(() => {
+    const fetchTimer = () => {
+      if (document.hidden) return; // Prevent background memory leaks
       fetch("/api/timer")
         .then((res) => res.json())
         .then((parsed) => {
           if (!parsed && isRunning) {
             // Stopped remotely
             setIsRunning(false);
-            setSessionDisplayMs(0);
-            setTaskDisplayMs(0);
+            setLastActionTick(Date.now());
             sessionStartRef.current = null;
             checkpointRef.current = null;
             setComment("");
@@ -139,9 +242,17 @@ export default function TimerPage() {
           }
         })
         .catch((e) => console.error("Polling error", e));
-    }, 3000);
+    };
 
-    return () => clearInterval(intervalId);
+    const intervalId = setInterval(fetchTimer, 10000); // 10s relaxed polling
+    window.addEventListener("focus", fetchTimer);
+    window.addEventListener("visibilitychange", fetchTimer);
+
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener("focus", fetchTimer);
+      window.removeEventListener("visibilitychange", fetchTimer);
+    };
   }, [isHydrated, isRunning]);
 
   // Auto-sync active state to global api automatically on input edits
@@ -168,24 +279,11 @@ export default function TimerPage() {
       .catch(console.error);
   }, []);
 
-  useEffect(() => {
-    if (!isRunning) return;
-    const id = setInterval(() => {
-      const now = Date.now();
-      if (sessionStartRef.current)
-        setSessionDisplayMs(now - sessionStartRef.current);
-      if (checkpointRef.current)
-        setTaskDisplayMs(now - checkpointRef.current);
-    }, 1000);
-    return () => clearInterval(id);
-  }, [isRunning]);
-
   const handleStart = () => {
     const now = Date.now();
     sessionStartRef.current = now;
     checkpointRef.current = now;
-    setSessionDisplayMs(0);
-    setTaskDisplayMs(0);
+    setLastActionTick(now);
     setIsRunning(true);
     syncState(true, now, now, comment, selectedProjectId);
   };
@@ -230,7 +328,7 @@ export default function TimerPage() {
     const now = Date.now();
     await saveEntry(comment, now);
     checkpointRef.current = now;
-    setTaskDisplayMs(0);
+    setLastActionTick(now);
     setComment("");
     
     // Synchronously force push the new checkpoint
@@ -244,8 +342,7 @@ export default function TimerPage() {
       setComment("");
     }
     setIsRunning(false);
-    setSessionDisplayMs(0);
-    setTaskDisplayMs(0);
+    setLastActionTick(now);
     sessionStartRef.current = null;
     checkpointRef.current = null;
     syncState(false, null, null, "", "");
@@ -386,33 +483,12 @@ export default function TimerPage() {
             )}
           </div>
 
-          <div
-            className="font-mono tabular-nums tracking-tighter relative z-10 transition-all duration-700 ease-out"
-            style={{
-              fontSize: "clamp(5rem, 15vw, 9rem)",
-              fontWeight: 400,
-              color: isRunning ? "var(--color-brand-primary)" : "var(--color-text-primary)",
-              textShadow: isRunning ? "0 4px 32px rgba(116, 97, 232, 0.3)" : "none",
-            }}
-          >
-            {formatTime(sessionDisplayMs)}
-          </div>
-          
-          <AnimatePresence>
-            {isRunning && (
-              <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="absolute left-1/2 -translate-x-1/2 -bottom-6 flex items-center gap-2"
-              >
-                <div className="w-1.5 h-1.5 rounded-full bg-[var(--color-brand-accent)] animate-pulse shadow-[0_0_8px_rgba(45,196,138,0.6)]" />
-                <span className="text-xs font-mono tracking-widest text-[var(--color-brand-accent)] uppercase font-semibold">
-                  {formatTime(taskDisplayMs)}
-                </span>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          <LiveClock 
+            sessionStartRef={sessionStartRef} 
+            checkpointRef={checkpointRef} 
+            isRunning={isRunning} 
+            lastActionTick={lastActionTick} 
+          />
         </motion.div>
 
         {/* Input & Controls Panel */}
@@ -447,14 +523,14 @@ export default function TimerPage() {
               </button>
             ) : (
               <>
-                <button
-                  onClick={handleLogTask}
-                  disabled={!comment.trim() || isSaving || taskDisplayMs < 60000}
-                  className="h-[56px] px-6 bg-[var(--color-brand-primary)] text-white font-medium rounded-xl flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all shadow-[0_8px_16px_-4px_rgba(116,97,232,0.4)] disabled:opacity-50 disabled:active:scale-100 flex-1 sm:flex-none justify-center"
-                >
-                  <CheckCircle2 className="w-5 h-5" />
-                  <span>{taskDisplayMs < 60000 ? "< 1 min" : "Log Task"}</span>
-                </button>
+                <LogTaskButton 
+                  checkpointRef={checkpointRef} 
+                  isRunning={isRunning} 
+                  isSaving={isSaving} 
+                  comment={comment} 
+                  onLogTask={handleLogTask} 
+                  lastActionTick={lastActionTick} 
+                />
                 <button
                   onClick={handleStop}
                   className="h-[56px] w-[56px] bg-white border border-[var(--color-text-muted)]/20 text-[var(--color-text-secondary)] hover:text-[var(--color-brand-secondary)] hover:border-[var(--color-brand-secondary)]/30 rounded-xl flex items-center justify-center hover:bg-white active:scale-95 transition-all shadow-sm shrink-0"
