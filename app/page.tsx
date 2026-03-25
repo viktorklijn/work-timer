@@ -99,6 +99,45 @@ export default function TimerPage() {
       .finally(() => setIsHydrated(true));
   }, []);
 
+  // Live polling for cross-device sync
+  useEffect(() => {
+    if (!isHydrated) return;
+
+    const intervalId = setInterval(() => {
+      fetch("/api/timer")
+        .then((res) => res.json())
+        .then((parsed) => {
+          if (!parsed && isRunning) {
+            // Stopped remotely
+            setIsRunning(false);
+            setSessionDisplayMs(0);
+            setTaskDisplayMs(0);
+            sessionStartRef.current = null;
+            checkpointRef.current = null;
+            setComment("");
+          } else if (parsed && parsed.sessionStart) {
+            // Started or updated remotely
+            const rSession = new Date(parsed.sessionStart).getTime();
+            const rCheckpoint = new Date(parsed.checkpointStart).getTime();
+            
+            if (!isRunning || sessionStartRef.current !== rSession || checkpointRef.current !== rCheckpoint) {
+              sessionStartRef.current = rSession;
+              checkpointRef.current = rCheckpoint;
+              setIsRunning(true);
+              
+              if (document.activeElement?.tagName !== "INPUT") {
+                setComment(parsed.comment || "");
+              }
+              if (parsed.projectId) setSelectedProjectId(parsed.projectId);
+            }
+          }
+        })
+        .catch((e) => console.error("Polling error", e));
+    }, 3000);
+
+    return () => clearInterval(intervalId);
+  }, [isHydrated, isRunning]);
+
   // Auto-sync active state to global api automatically on input edits
   useEffect(() => {
     if (!isHydrated) return;
