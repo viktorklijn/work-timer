@@ -70,39 +70,43 @@ export default function TimerPage() {
   const sessionStartRef = useRef<number | null>(null);
   const checkpointRef = useRef<number | null>(null);
 
-  // Restore state from localStorage on mount
+  const syncState = (run: boolean, ss: number | null, cs: number | null, c: string, p: string) => {
+    if (!run || !ss || !cs) {
+      fetch("/api/timer", { method: "DELETE" }).catch(console.error);
+    } else {
+      fetch("/api/timer", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionStart: ss, checkpointStart: cs, comment: c, projectId: p || null })
+      }).catch(console.error);
+    }
+  };
+
+  // Restore state from global database on mount
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("work-timer-active");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.isRunning) {
-          sessionStartRef.current = parsed.sessionStart;
-          checkpointRef.current = parsed.checkpointStart;
+    fetch("/api/timer")
+      .then(res => res.json())
+      .then(parsed => {
+        if (parsed && parsed.sessionStart) {
+          sessionStartRef.current = new Date(parsed.sessionStart).getTime();
+          checkpointRef.current = new Date(parsed.checkpointStart).getTime();
           setComment(parsed.comment || "");
           if (parsed.projectId) setSelectedProjectId(parsed.projectId);
           setIsRunning(true);
         }
-      }
-    } catch (e) {
-      console.error("Failed to parse saved timer state", e);
-    }
-    setIsHydrated(true);
+      })
+      .catch(e => console.error("Failed to fetch global timer state", e))
+      .finally(() => setIsHydrated(true));
   }, []);
 
-  // Save current active state to localStorage automatically
+  // Auto-sync active state to global api automatically on input edits
   useEffect(() => {
     if (!isHydrated) return;
-    if (isRunning) {
-      localStorage.setItem("work-timer-active", JSON.stringify({
-        isRunning: true,
-        sessionStart: sessionStartRef.current,
-        checkpointStart: checkpointRef.current,
-        comment,
-        projectId: selectedProjectId
-      }));
-    } else {
-      localStorage.removeItem("work-timer-active");
+    if (isRunning && sessionStartRef.current && checkpointRef.current) {
+      const timeout = setTimeout(() => {
+        syncState(true, sessionStartRef.current, checkpointRef.current, comment, selectedProjectId);
+      }, 1000); // 1s debounce
+      return () => clearTimeout(timeout);
     }
   }, [isRunning, comment, isHydrated, selectedProjectId]);
 
@@ -138,6 +142,7 @@ export default function TimerPage() {
     setSessionDisplayMs(0);
     setTaskDisplayMs(0);
     setIsRunning(true);
+    syncState(true, now, now, comment, selectedProjectId);
   };
 
   const saveEntry = useCallback(
@@ -183,14 +188,8 @@ export default function TimerPage() {
     setTaskDisplayMs(0);
     setComment("");
     
-    // Manually force an update to localStorage right after logging so the new checkpoint is saved
-    localStorage.setItem("work-timer-active", JSON.stringify({
-      isRunning: true,
-      sessionStart: sessionStartRef.current,
-      checkpointStart: now,
-      comment: "",
-      projectId: selectedProjectId
-    }));
+    // Synchronously force push the new checkpoint
+    syncState(true, sessionStartRef.current, now, "", selectedProjectId);
   };
 
   const handleStop = async () => {
@@ -204,7 +203,7 @@ export default function TimerPage() {
     setTaskDisplayMs(0);
     sessionStartRef.current = null;
     checkpointRef.current = null;
-    localStorage.removeItem("work-timer-active");
+    syncState(false, null, null, "", "");
   };
 
   const handleDelete = async (id: string) => {
