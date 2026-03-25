@@ -48,6 +48,12 @@ function formatDuration(seconds: number): string {
   return `${m}m`;
 }
 
+function formatDurationHHMM(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
 function todayDateString(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -272,11 +278,11 @@ export default function TimerPage() {
 
   const handleCopyToSpreadsheet = async () => {
     if (entries.length === 0) return;
-    const header = "Date\tProject\tTime (hrs mins)\tTask/Log\n";
+    const header = "Date\tProject\tDuration\tTask/Log\n";
     const rows = entries.map(entry => {
       const d = entry.date.split("T")[0];
       const p = entry.project?.name || "Uncategorized";
-      const t = formatDuration(entry.durationSeconds);
+      const t = formatDurationHHMM(entry.durationSeconds);
       const c = entry.comment.replace(/\t/g, " ").replace(/\n/g, " "); // sanitize for tsv
       return `${d}\t${p}\t${t}\t${c}`;
     }).join("\n");

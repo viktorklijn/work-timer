@@ -29,6 +29,12 @@ function formatDuration(seconds: number): string {
   return `${m}m`;
 }
 
+function formatDurationHHMM(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
 export default function HistoryPage() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -60,14 +66,14 @@ export default function HistoryPage() {
         hasEntries = true;
         const d = entry.date.split("T")[0];
         const p = pg.projectName;
-        const t = formatDuration(entry.durationSeconds);
+        const t = formatDurationHHMM(entry.durationSeconds);
         const c = entry.comment.replace(/\t/g, " ").replace(/\n/g, " ");
         rows.push(`${d}\t${p}\t${t}\t${c}`);
       });
     });
     
     if (!hasEntries) return;
-    const header = "Date\tProject\tTime (hrs mins)\tTask/Log\n";
+    const header = "Date\tProject\tDuration\tTask/Log\n";
     
     await navigator.clipboard.writeText(header + rows.join("\n"));
     setCopiedGroupDate(day.dateStr);
