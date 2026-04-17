@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, Square, CheckCircle2, History, Trash2, Clock, Copy, X } from "lucide-react";
+import { Play, Square, CheckCircle2, History, Trash2, Clock, Copy, X, Circle } from "lucide-react";
 
 type Project = {
   id: string;
@@ -20,6 +20,13 @@ type Entry = {
   comment: string;
   createdAt: string;
   project?: Project;
+};
+
+type Todo = {
+  id: string;
+  text: string;
+  completed: boolean;
+  createdAt: string;
 };
 
 function formatTime(ms: number): string {
@@ -168,6 +175,8 @@ export default function TimerPage() {
   const [lastActionTick, setLastActionTick] = useState(0);
   const [comment, setComment] = useState("");
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [todos, setTodos] = useState<Todo[]>([]);
+  const [newTodo, setNewTodo] = useState("");
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [isCreatingProject, setIsCreatingProject] = useState(false);
@@ -277,6 +286,11 @@ export default function TimerPage() {
       .then((r) => r.json())
       .then((data) => setProjects(Array.isArray(data) ? data : []))
       .catch(console.error);
+
+    fetch("/api/todos")
+      .then((r) => r.json())
+      .then((data) => setTodos(Array.isArray(data) ? data : []))
+      .catch(console.error);
   }, []);
 
   const handleStart = () => {
@@ -368,6 +382,52 @@ export default function TimerPage() {
         setNewProjectName("");
         setIsCreatingProject(false);
       }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleCreateTodo = async () => {
+    if (!newTodo.trim()) return;
+    try {
+      const res = await fetch("/api/todos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: newTodo.trim() }),
+      });
+      if (res.ok) {
+        const todo = await res.json();
+        setTodos((prev) => [todo, ...prev]);
+        setNewTodo("");
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleToggleTodo = async (id: string, completed: boolean) => {
+    try {
+      await fetch("/api/todos", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, completed: !completed }),
+      });
+      setTodos((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, completed: !completed } : t))
+      );
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleDeleteTodo = async (id: string) => {
+    try {
+      await fetch("/api/todos", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      setTodos((prev) => prev.filter((t) => t.id !== id));
     } catch (e) {
       console.error(e);
     }
@@ -547,7 +607,7 @@ export default function TimerPage() {
       {/* Today's Log */}
       <AnimatePresence>
         {entries.length > 0 && (
-          <motion.section 
+          <motion.section
             initial={{ y: 40, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 20, opacity: 0 }}
@@ -570,7 +630,7 @@ export default function TimerPage() {
                 {isCopied ? "Copied!" : "Copy to Sheets"}
               </button>
             </div>
-            
+
             <div className="glass-panel rounded-2xl overflow-hidden divide-y divide-[var(--color-text-primary)]/5 bg-white/60">
               <AnimatePresence initial={false}>
                 {entries.map((entry) => (
@@ -594,8 +654,8 @@ export default function TimerPage() {
                         </span>
                         {entry.project && (
                           <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-secondary)] flex items-center gap-1.5 mt-1 bg-[var(--color-text-primary)]/5 border border-[var(--color-text-primary)]/10 px-2 py-0.5 rounded-md w-fit shadow-sm">
-                            <span 
-                              className="w-1.5 h-1.5 rounded-full" 
+                            <span
+                              className="w-1.5 h-1.5 rounded-full"
                               style={{ backgroundColor: entry.project.color || 'var(--color-brand-primary)' }}
                             />
                             {entry.project.name}
@@ -617,6 +677,79 @@ export default function TimerPage() {
           </motion.section>
         )}
       </AnimatePresence>
+
+      {/* Todo List */}
+      <motion.section
+        initial={{ y: 40, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: 0.1 }}
+        className="w-full max-w-2xl mx-auto px-6 pb-12 relative z-10"
+      >
+        <div className="flex items-center justify-between mb-6 px-2">
+          <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Todo</h2>
+          {todos.filter(t => !t.completed).length > 0 && (
+            <span className="text-sm font-mono text-[var(--color-brand-accent)] bg-[var(--color-brand-accent)]/10 px-3 py-1 rounded-full font-medium">
+              {todos.filter(t => !t.completed).length} remaining
+            </span>
+          )}
+        </div>
+
+        <div className="glass-panel rounded-2xl overflow-hidden bg-white/60">
+          {/* Add todo input */}
+          <div className="flex items-center gap-3 px-5 py-3 border-b border-[var(--color-text-primary)]/5">
+            <input
+              type="text"
+              value={newTodo}
+              onChange={(e) => setNewTodo(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleCreateTodo()}
+              placeholder="Add a todo..."
+              className="flex-1 bg-transparent border-none text-[15px] font-medium text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:ring-0"
+            />
+            <button
+              onClick={handleCreateTodo}
+              disabled={!newTodo.trim()}
+              className="text-[var(--color-brand-primary)] hover:brightness-110 disabled:opacity-40 transition-all"
+            >
+              <CheckCircle2 className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Todo list */}
+          {todos.length === 0 ? (
+            <div className="px-5 py-8 text-center">
+              <p className="text-sm text-[var(--color-text-muted)]">No todos yet</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-[var(--color-text-primary)]/5">
+              {todos.map((todo) => (
+                <div key={todo.id} className="group flex items-center gap-3 px-5 py-3 hover:bg-black/5 transition-colors">
+                  <button
+                    onClick={() => handleToggleTodo(todo.id, todo.completed)}
+                    className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all shrink-0 ${
+                      todo.completed
+                        ? "bg-[var(--color-brand-accent)] border-[var(--color-brand-accent)]"
+                        : "border-[var(--color-text-muted)] hover:border-[var(--color-brand-accent)]"
+                    }`}
+                  >
+                    {todo.completed && <CheckCircle2 className="w-4 h-4 text-white" />}
+                    {!todo.completed && <Circle className="w-3.5 h-3.5 text-transparent group-hover:text-[var(--color-brand-accent)]" />}
+                  </button>
+                  <span className={`flex-1 text-[15px] font-medium ${todo.completed ? "line-through text-[var(--color-text-muted)]" : "text-[var(--color-text-primary)]"}`}>
+                    {todo.text}
+                  </span>
+                  <button
+                    onClick={() => handleDeleteTodo(todo.id)}
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-brand-secondary)] hover:bg-[var(--color-brand-secondary)]/10 transition-all opacity-0 group-hover:opacity-100"
+                    aria-label="Delete todo"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </motion.section>
     </div>
   );
 }

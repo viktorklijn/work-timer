@@ -45,3 +45,10 @@ model Entry {
   @@index([date])
   @@index([projectId])
 }
+
+model Todo {
+  id        String   @id @default(cuid())
+  text      String
+  completed Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
